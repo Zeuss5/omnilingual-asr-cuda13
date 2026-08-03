@@ -3,6 +3,43 @@
   <p><i>Photographs captured during corpus creation efforts in Pakistan and Liberia.</i></p>
 </div>
 
+> ### This fork: CUDA 13.0 support + a fused decode path
+>
+> Upstream omnilingual-asr cannot run on CUDA 13 — it requires `fairseq2 <= 0.6.0`,
+> whose `fairseq2n` wheel pins `torch 2.8.0` and links `libcudart.so.12`. This fork
+> builds `fairseq2n` from source against **torch 2.10.0+cu130** and adds a fused,
+> CUDA-graph-captured decode path for the LLM-ASR models: **2.25× faster
+> end-to-end**, with byte-identical transcriptions.
+>
+> **Setup is different from upstream — see [`cuda13/README.md`](cuda13/README.md).**
+> Short version, from a clean checkout on a machine with the CUDA 13.0 toolkit:
+>
+> ```bash
+> sudo apt-get install -y libsndfile1-dev
+> uv venv --python 3.12
+> uv pip install torch==2.10.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu130
+> uv pip install "cmake~=3.31" "ninja~=1.11" "tbb-devel==2021.8" "setuptools~=80.9" "wheel~=0.45"
+> ./cuda13/build_fairseq2n_cu130.sh                    # clone, patch, build, install fairseq2n + fairseq2
+> uv pip install --no-build-isolation --no-deps -e .   # --no-deps keeps the cu130 torch
+> uv pip install numba pandas soundfile librosa
+> .venv/bin/python cuda13/verify_cuda13.py             # end-to-end check
+> ```
+>
+> Then opt into the fast path with two extra lines:
+>
+> ```python
+> from omnilingual_asr.models.inference.pipeline import ASRInferencePipeline
+> from omnilingual_asr.fused import enable_fused_decoding
+>
+> pipe = ASRInferencePipeline(model_card="omniASR_LLM_300M_v2")
+> enable_fused_decoding(pipe)
+> print(pipe.transcribe(["audio.wav"], lang=["eng_Latn"]))
+> ```
+>
+> Performance analysis, benchmarks and rejected experiments:
+> [`cuda13/OPTIMIZATION.md`](cuda13/OPTIMIZATION.md).
+> Everything below this box is the original upstream README.
+
 # Omnilingual ASR: Open-Source Multilingual Speech Recognition for 1600+ Languages
 
 Omnilingual ASR is an open-source speech recognition system supporting over 1,600 languages — including hundreds never previously covered by any ASR technology. Designed for broad accessibility, it enables new languages to be added with just a few paired examples without requiring specialized expertise or large datasets. By combining scalable zero-shot learning with a flexible model family, Omnilingual ASR aims to make speech technology more inclusive and adaptable for communities and researchers worldwide.
