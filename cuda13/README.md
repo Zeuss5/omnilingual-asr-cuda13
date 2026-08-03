@@ -54,18 +54,93 @@ Also note `torchaudio` must be pinned to **2.10.0** — pip resolves 2.11.0 by
 default, which needs torch 2.11 and fails to load with
 `undefined symbol: torch_dtype_float4_e2m1fn_x2`.
 
-## Reproducing
+## Setup
+
+### Prerequisites
+
+| | |
+| --- | --- |
+| CUDA toolkit | **13.0**, with `nvcc` (default `/usr/local/cuda-13.0`) |
+| NVIDIA driver | one that supports CUDA 13 (tested on 580.126.09) |
+| Python | 3.10-3.13 (built and tested on 3.12) |
+| system packages | `libsndfile1-dev` |
+| tooling | [`uv`](https://docs.astral.sh/uv/), `git`, a C++17 compiler |
+
+The CUDA toolkit must be a real install, not just the pip `nvidia-*` wheels —
+`fairseq2n` is compiled against its headers. If `nvcc` is not on `PATH`, set
+`CUDA_HOME` (the build script also probes `/usr/local/cuda` and
+`/usr/local/cuda-13.0`).
+
+### Install
+
+Run from the repository root. Every step matters in this order — in particular
+`--no-deps` in step 5, which stops pip from replacing the cu130 torch with a
+default-index build.
 
 ```bash
-apt-get install -y libsndfile1-dev
-uv pip install torch==2.10.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu130
-uv pip install "cmake~=3.31" "ninja~=1.11" "tbb-devel==2021.8"
-./cuda13/build_fairseq2n_cu130.sh          # clones, patches, builds, installs
+# 1. system dependency for fairseq2n's audio decoder
+sudo apt-get install -y libsndfile1-dev
+export CUDA_HOME=/usr/local/cuda-13.0
+
+# 2. virtual environment
+uv venv --python 3.12
+
+# 3. torch + torchaudio for CUDA 13.
+#    torchaudio MUST be pinned to 2.10.0: pip otherwise resolves 2.11.0, which
+#    needs torch 2.11 and fails with `undefined symbol: torch_dtype_float4_e2m1fn_x2`.
+uv pip install torch==2.10.0 torchaudio==2.10.0 \
+    --index-url https://download.pytorch.org/whl/cu130
+
+# 4. native build dependencies
+uv pip install "cmake~=3.31" "ninja~=1.11" "tbb-devel==2021.8" \
+    "setuptools~=80.9" "wheel~=0.45"
+
+# 5. build and install fairseq2n + fairseq2 (clone, patch, cmake, install, verify)
+./cuda13/build_fairseq2n_cu130.sh
+
+# 6. omnilingual-asr itself
 uv pip install --no-build-isolation --no-deps -e .
+
+# 7. remaining runtime dependencies
+uv pip install numba pandas soundfile librosa
 ```
 
-`CUDA_ARCHS` defaults to `120-real;120-virtual` (Blackwell); override for other
-GPUs. The build tree lands in `cuda13/fairseq2/` and is gitignored.
+Step 5 takes roughly 10 minutes: it clones fairseq2 v0.6, checks out pybind11
+v3.0.1, applies `patches/`, and compiles ~190 targets. `CUDA_ARCHS` defaults to
+`120-real;120-virtual` (Blackwell / sm_120) — override it for another GPU, e.g.
+`CUDA_ARCHS="90-real;90-virtual" ./cuda13/build_fairseq2n_cu130.sh` for H100.
+`VENV` and `JOBS` are also overridable. The build tree lands in
+`cuda13/fairseq2/` and is gitignored (~282 MB), so a fresh clone rebuilds it.
+
+Step 6 uses `--no-deps` deliberately. `pyproject.toml` lists an unpinned `torch`,
+and a normal install would pull the default-index (CUDA 12) wheel over the cu130
+one. Step 7 then adds the runtime packages that `--no-deps` skipped; `kenlm` is
+listed upstream but is not needed for inference.
+
+### Resulting versions
+
+```
+torch 2.10.0+cu130   torchaudio 2.10.0+cu130   triton 3.6.0
+fairseq2 0.6         fairseq2n 0.6 (source)    numpy 1.26.4
+```
+
+### Using the fused decode path
+
+Optional, and only applies to the LLM-ASR cards:
+
+```python
+from omnilingual_asr.models.inference.pipeline import ASRInferencePipeline
+from omnilingual_asr.fused import enable_fused_decoding
+
+pipe = ASRInferencePipeline(model_card="omniASR_LLM_300M_v2")
+enable_fused_decoding(pipe)
+print(pipe.transcribe(["audio.wav"], lang=["eng_Latn"]))
+```
+
+It JIT-compiles a small CUDA extension on first use (a few seconds, then cached
+in `~/.cache/torch_extensions`). If `nvcc` or `ninja` is unavailable it falls
+back to `F.linear` and still works. See
+[OPTIMIZATION.md](OPTIMIZATION.md).
 
 ## Verifying
 

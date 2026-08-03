@@ -40,6 +40,14 @@ if [ ! -d "$SRC" ]; then
     git -C "$SRC" apply "$PROJECT_ROOT/cuda13/patches/"*.patch
 fi
 
+# A CMake cache records the absolute path it was generated from, so a build tree
+# that has been moved (or copied from another checkout) fails to reconfigure.
+CACHE="$SRC/native/build/CMakeCache.txt"
+if [ -f "$CACHE" ] && ! grep -qx "CMAKE_HOME_DIRECTORY:INTERNAL=$SRC/native" "$CACHE"; then
+    echo "==> Stale CMake cache (build tree moved); reconfiguring from scratch"
+    rm -rf "$SRC/native/build"
+fi
+
 echo "==> Configuring (CUDA $("$CUDA_HOME/bin/nvcc" --version | tail -1), arch $CUDA_ARCHS)"
 cmake -GNinja \
     -DFAIRSEQ2N_USE_CUDA=ON \
