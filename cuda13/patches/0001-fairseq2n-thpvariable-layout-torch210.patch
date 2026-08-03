@@ -1,0 +1,43 @@
+diff --git a/native/python/src/fairseq2n/bindings/type_casters/torch.cc b/native/python/src/fairseq2n/bindings/type_casters/torch.cc
+index be6f30d..2e7e450 100644
+--- a/native/python/src/fairseq2n/bindings/type_casters/torch.cc
++++ b/native/python/src/fairseq2n/bindings/type_casters/torch.cc
+@@ -15,9 +15,26 @@ using namespace fairseq2n;
+ using namespace fairseq2n::detail;
+ 
+ // Taken from <torch/bindings/autograd/python_variable.h>
++//
++// We mirror the layout here instead of including the real header because
++// <torch/csrc/utils/pybind.h> (pulled in by it) declares its own
++// `type_caster<at::Tensor>`, which would clash with ours.
++//
++// PyTorch 2.10 changed `cdata` from `at::MaybeOwned<at::Tensor>` to a plain
++// `at::Tensor`; reading it with the old layout dereferences garbage.
++#if TORCH_VERSION_MAJOR > 2 || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 10)
++#define FAIRSEQ2N_THPVARIABLE_PLAIN_CDATA 1
++#endif
++
+ struct THPVariable {
+     PyObject_HEAD
++#ifdef FAIRSEQ2N_THPVARIABLE_PLAIN_CDATA
++    at::Tensor cdata;
++#else
+     at::MaybeOwned<at::Tensor> cdata;
++#endif
++    PyObject *backward_hooks;
++    PyObject *post_accumulate_grad_hooks;
+ };
+ 
+ extern PyObject *THPVariableClass;
+@@ -64,7 +81,11 @@ type_caster<at::Tensor>::load(handle src, bool)
+     PyObject *ptr = src.ptr();
+ 
+     if (isinstance<at::Tensor>(ptr)) {
++#ifdef FAIRSEQ2N_THPVARIABLE_PLAIN_CDATA
++        value = reinterpret_cast<THPVariable *>(ptr)->cdata;
++#else
+         value = *reinterpret_cast<THPVariable *>(ptr)->cdata;
++#endif
+ 
+         return true;
+     }

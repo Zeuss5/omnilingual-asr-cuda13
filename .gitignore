@@ -73,3 +73,6 @@ dmypy.json
 
 # Profiling
 .prof
+
+# CUDA 13 build tree (see cuda13/README.md)
+cuda13/fairseq2/

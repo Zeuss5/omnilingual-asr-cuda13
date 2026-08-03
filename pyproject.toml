@@ -80,6 +80,8 @@ version = {attr = "omnilingual_asr.__version__"}
 
 [tool.setuptools.package-data]
 "omnilingual_asr" = ["py.typed"]
+# JIT-compiled at first use by omnilingual_asr.fused.cuda_ops
+"omnilingual_asr.fused" = ["csrc/*.cu"]
 "omnilingual_asr.cards" = ["**/*.yaml"]
 "omnilingual_asr.models.wav2vec2_llama" = ["*.parquet"]
 
